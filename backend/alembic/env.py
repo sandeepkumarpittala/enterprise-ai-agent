@@ -12,10 +12,13 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.core.config import settings
-
+from app.db.base import Base
+import app.models
 
 # Alembic Config object.
 config = context.config
+
+
 
 
 # Configure Python logging from alembic.ini.
@@ -25,7 +28,9 @@ if config.config_file_name is not None:
 
 # We don't have SQLAlchemy models yet.
 # This will be connected to Base.metadata when we create our models.
-target_metadata = None
+
+
+target_metadata = Base.metadata
 
 
 def get_database_url() -> str:
