@@ -1,3 +1,4 @@
+
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, String, func
@@ -34,6 +35,17 @@ class Document(Base):
         String(500),
         nullable=False,
     )
+
+    content_hash: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        index=True,
+    )
+    duplicate_protection_enabled: Mapped[bool] = mapped_column(
+    default=False,
+    server_default="false",
+    nullable=False,
+)
 
     status: Mapped[str] = mapped_column(
         String(50),
