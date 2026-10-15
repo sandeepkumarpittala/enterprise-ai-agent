@@ -1,3 +1,4 @@
+
 import logging
 from typing import Any
 
@@ -34,9 +35,9 @@ def chat(
     db: Session = Depends(get_db),
 ) -> ChatResponse:
     try:
-        # Use the requested conversation only if it belongs to this user.
         conversation = None
 
+        # Verify that the conversation belongs to the authenticated user.
         if conversation_id is not None:
             conversation = db.scalar(
                 select(Conversation).where(
@@ -51,25 +52,46 @@ def chat(
                     detail="Conversation not found.",
                 )
 
-        # Create a conversation automatically for a new chat.
+        # Create a conversation when no ID is provided.
         if conversation is None:
-            title = request.question.strip()[:80]
-
             conversation = Conversation(
                 user_id=current_user.id,
-                title=title,
+                title=request.question.strip()[:80],
             )
             db.add(conversation)
             db.flush()
 
-        # Generate a grounded answer from the user's documents.
+        # Load the latest 10 messages in chronological order.
+        history: list[dict[str, str]] = []
+
+        if conversation_id is not None:
+            previous_messages = db.scalars(
+                select(Message)
+                .where(Message.conversation_id == conversation.id)
+                .order_by(
+                    Message.created_at.desc(),
+                    Message.id.desc(),
+                )
+                .limit(10)
+            ).all()
+
+            history = [
+                {
+                    "role": message.role,
+                    "content": message.content,
+                }
+                for message in reversed(previous_messages)
+            ]
+
+        # Generate an answer using document context and conversation history.
         result = answer_question(
             question=request.question,
             user_id=current_user.id,
             limit=request.limit,
+            conversation_history=history,
         )
 
-        # Save both messages to the same conversation.
+        # Save both the user's question and the assistant's answer.
         user_message = Message(
             conversation_id=conversation.id,
             role="user",
@@ -85,9 +107,7 @@ def chat(
         db.add_all([user_message, assistant_message])
         db.flush()
 
-        # Update the conversation's activity timestamp.
         conversation.updated_at = user_message.created_at
-
         db.commit()
 
         return ChatResponse(
@@ -122,5 +142,7 @@ def chat(
         logger.exception("Unexpected chat endpoint failure")
         raise HTTPException(
             status_code=500,
-            detail="An unexpected error occurred while answering the question.",
+            detail=(
+                "An unexpected error occurred while answering the question."
+            ),
         ) from exc
