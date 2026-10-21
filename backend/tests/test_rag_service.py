@@ -1,3 +1,4 @@
+
 from unittest.mock import patch
 
 import pytest
@@ -78,6 +79,7 @@ def test_invalid_inputs_raise_value_error(question, user_id, limit):
             limit=limit,
         )
 
+
 @patch("app.services.rag_service.generate_answer")
 @patch("app.services.rag_service.search_documents")
 def test_follow_up_question_uses_previous_question_for_retrieval(
@@ -118,6 +120,7 @@ def test_follow_up_question_uses_previous_question_for_retrieval(
 
     mock_search_documents.assert_called_once()
     retrieval_query = mock_search_documents.call_args.kwargs["query"]
+
     assert "What vector database does this project use?" in retrieval_query
     assert "Which database was that?" in retrieval_query
 
@@ -127,15 +130,19 @@ def test_follow_up_question_uses_previous_question_for_retrieval(
         == history
     )
 
+
 @patch("app.services.rag_service.generate_answer")
 @patch("app.services.rag_service.search_documents")
-def test_follow_up_reuses_previous_answer_when_fully_supported(
+def test_follow_up_generates_fresh_answer_using_history(
     mock_search_documents,
     mock_generate_answer,
 ):
     mock_search_documents.return_value = [
         {
-            "content": "The vector database is Qdrant.",
+            "content": (
+                "Qdrant is the vector database. It stores embeddings "
+                "and enables semantic search for relevant document chunks."
+            ),
             "filename": "rag-test.pdf",
             "document_id": 1,
             "chunk_id": "chunk-1",
@@ -143,6 +150,9 @@ def test_follow_up_reuses_previous_answer_when_fully_supported(
             "score": 0.92,
         }
     ]
+    mock_generate_answer.return_value = (
+        "Qdrant stores embeddings and enables semantic search."
+    )
 
     history = [
         {
@@ -156,10 +166,36 @@ def test_follow_up_reuses_previous_answer_when_fully_supported(
     ]
 
     result = answer_question(
-        question="Which database was that?",
+        question="What is it used for?",
         user_id=1,
+        limit=5,
         conversation_history=history,
     )
 
-    assert result["answer"] == "The vector database is Qdrant."
-    mock_generate_answer.assert_not_called()
+    expected_context = (
+        "[Source: rag-test.pdf; Document ID: 1; Chunk ID: chunk-1]\n"
+        "Qdrant is the vector database. It stores embeddings "
+        "and enables semantic search for relevant document chunks."
+    )
+
+    assert result["answer"] == (
+        "Qdrant stores embeddings and enables semantic search."
+    )
+
+    mock_search_documents.assert_called_once()
+    retrieval_query = mock_search_documents.call_args.kwargs["query"]
+
+    assert "What vector database does this project use?" in retrieval_query
+    assert "What is it used for?" in retrieval_query
+
+    mock_generate_answer.assert_called_once_with(
+        question=(
+            "The previous exchange was:\n"
+            "User: What vector database does this project use?\n"
+            "Assistant: The vector database is Qdrant.\n\n"
+            "Answer this follow-up about the same subject: "
+            "What is it used for?"
+        ),
+        context=expected_context,
+        conversation_history=history,
+    )
