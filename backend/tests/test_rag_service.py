@@ -193,8 +193,10 @@ def test_follow_up_generates_fresh_answer_using_history(
             "The previous exchange was:\n"
             "User: What vector database does this project use?\n"
             "Assistant: The vector database is Qdrant.\n\n"
-            "Answer this follow-up about the same subject: "
-            "What is it used for?"
+            "Current follow-up question: What is it used for?\n\n"
+            "Answer the follow-up directly using the retrieved context. "
+            "Explain the specific purpose or process being asked about. "
+            "Do not merely repeat the previous answer."
         ),
         context=expected_context,
         conversation_history=history,

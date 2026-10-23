@@ -33,6 +33,7 @@ def answer_question(
     question = question.strip()
     history = conversation_history or []
 
+    # Keep only valid user and assistant messages.
     recent_history = [
         item
         for item in history
@@ -44,30 +45,23 @@ def answer_question(
         )
     ][-6:]
 
-    # Find the most recent user question and assistant response.
+    # Find the most recent completed, adjacent user-assistant exchange.
     previous_user_question = None
     previous_assistant_answer = None
 
-    for item in reversed(recent_history):
-        if (
-            previous_assistant_answer is None
-            and item["role"] == "assistant"
-        ):
-            previous_assistant_answer = item["content"].strip()
-
-        elif (
-            previous_user_question is None
-            and item["role"] == "user"
-        ):
-            previous_user_question = item["content"].strip()
+    for index in range(len(recent_history) - 1, 0, -1):
+        previous = recent_history[index - 1]
+        current = recent_history[index]
 
         if (
-            previous_user_question is not None
-            and previous_assistant_answer is not None
+            previous["role"] == "user"
+            and current["role"] == "assistant"
         ):
+            previous_user_question = previous["content"].strip()
+            previous_assistant_answer = current["content"].strip()
             break
 
-    # Resolve short follow-ups using both parts of the previous exchange.
+    # Resolve short follow-up questions using the previous exchange.
     retrieval_query = question
     generation_question = question
 
@@ -82,12 +76,14 @@ def answer_question(
             f"Current follow-up question: {question}"
         )
 
-        # Make the follow-up subject explicit for the language model.
         generation_question = (
             f"The previous exchange was:\n"
             f"User: {previous_user_question}\n"
             f"Assistant: {previous_assistant_answer}\n\n"
-            f"Answer this follow-up about the same subject: {question}"
+            f"Current follow-up question: {question}\n\n"
+            f"Answer the follow-up directly using the retrieved context. "
+            f"Explain the specific purpose or process being asked about. "
+            f"Do not merely repeat the previous answer."
         )
 
     retrieved_chunks = search_documents(
