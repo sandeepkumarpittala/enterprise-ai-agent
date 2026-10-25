@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_DB: enterprise_ai
       POSTGRES_USER: enterprise_user
-      POSTGRES_PASSWORD: REDACTED_DEVELOPMENT_PASSWORD
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in your .env file}
     ports:
       - "5432:5432"
     volumes:
