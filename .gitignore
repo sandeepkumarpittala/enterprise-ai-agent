@@ -33,3 +33,5 @@ htmlcov/
 
 # Local data
 data/
+# Generated RAG evaluation report
+backend/rag_evaluation_report.json
