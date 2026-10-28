@@ -44,3 +44,35 @@ def test_normal_answer_is_not_an_abstention():
 
 def test_normalize_lowercases_and_collapses_whitespace():
     assert normalize("  RAG   Uses\nQdrant  ") == "rag uses qdrant"
+
+def test_answer_correctness_rejects_answer_missing_required_concepts():
+    case = {"id": "rag-001"}
+    answer = "The application uses PostgreSQL as its relational database."
+
+    assert answer_matches_expected_concepts(case, answer) is False
+
+
+def test_answer_correctness_does_not_accept_unrelated_answer():
+    case = {"id": "rag-001"}
+    answer = "I could not find the answer in the provided documents."
+
+    assert answer_matches_expected_concepts(case, answer) is False
+
+def test_answerable_question_rejects_abstention():
+    case = {"id": "rag-001"}
+    answer = "I could not find the answer in the provided documents."
+
+    assert answer_matches_expected_concepts(case, answer) is False
+
+def test_expected_fact_must_appear_in_retrieved_content():
+    expected_fact = "Qdrant is the vector database."
+
+    relevant_chunk = (
+        "The application uses Qdrant as its vector database."
+    )
+    irrelevant_chunk = (
+        "The application uses PostgreSQL for relational data."
+    )
+
+    assert "qdrant" in relevant_chunk.lower()
+    assert "qdrant" not in irrelevant_chunk.lower()

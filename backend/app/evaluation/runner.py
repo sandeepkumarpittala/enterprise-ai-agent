@@ -7,9 +7,11 @@ import re
 import time
 from pathlib import Path
 from statistics import mean
+from typing import Any
 
 from app.evaluation.dataset import EVALUATION_DATASET
 from app.services.rag_service import answer_question
+from app.services.search_service import search_documents
 
 
 UNANSWERED_MARKERS = (
@@ -23,9 +25,8 @@ UNANSWERED_MARKERS = (
     "cannot determine from the provided documents",
 )
 
-# Each inner tuple represents one required concept.
-# At least one alternative in each tuple must appear in the answer.
-# These are transparent heuristic checks, not semantic or human evaluation.
+# Required concepts for deterministic answer checks.
+# These are lexical heuristics, not semantic or human evaluation.
 EXPECTED_CONCEPTS = {
     "rag-001": [("qdrant",)],
     "rag-002": [("fastapi",)],
@@ -57,14 +58,51 @@ EXPECTED_CONCEPTS = {
         ("authenticated user", "document owner", "belongs to the user", "user"),
     ],
     "rag-011": [
-    ("reduce unsupported answers", "reduces unsupported answers"),
-    ("retrieval", "retrieve", "retrieves"),
-    ("source-grounding", "source grounding", "grounded"),
-],
+        ("reduce unsupported answers", "reduces unsupported answers"),
+        ("retrieval", "retrieve", "retrieves"),
+        ("source-grounding", "source grounding", "grounded"),
+    ],
     "rag-012": [
         ("qdrant",),
         ("postgresql",),
     ],
+}
+
+# Required concepts expected in retrieved evidence.
+# This checks lexical coverage across chunks from the expected document.
+# It does not prove semantic relevance or entailment.
+RETRIEVAL_CONCEPTS = {
+    "rag-001": [("qdrant",)],
+    "rag-002": [("fastapi",)],
+    "rag-003": [("sentence-transformers/all-minilm-l6-v2",)],
+    "rag-004": [
+        ("extract", "extracted", "extraction"),
+        ("chunk", "chunks", "chunking"),
+        ("embedding", "embeddings"),
+        ("store", "stored", "storage"),
+    ],
+    "rag-006": [("react",), ("vite",)],
+    "rag-007": [("postgresql",)],
+    "rag-008": [("ollama",)],
+    "rag-009": [
+        ("embedding", "embeds", "embedded"),
+        ("qdrant",),
+        ("retrieval", "retrieve", "retrieved"),
+        ("language model", "llm"),
+    ],
+    "rag-010": [
+        ("extract", "extraction"),
+        ("chunk", "chunks", "chunking"),
+        ("embedding", "embeddings"),
+        ("retrieval", "retrieve", "retrieved"),
+        ("authenticated user", "document owner", "user"),
+    ],
+    "rag-011": [
+        ("retrieval", "retrieve", "retrieves"),
+        ("source-grounding", "source grounding", "grounded"),
+        ("unsupported answers",),
+    ],
+    "rag-012": [("qdrant",), ("postgresql",)],
 }
 
 
@@ -73,26 +111,69 @@ def normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text.lower()).strip()
 
 
+def is_abstention(answer: str) -> bool:
+    """Detect common explicit statements that the source lacks an answer."""
+    normalized_answer = normalize(answer)
+    return any(
+        marker in normalized_answer
+        for marker in UNANSWERED_MARKERS
+    )
+
+
 def answer_matches_expected_concepts(case: dict, answer: str) -> bool:
-    """Return whether an answer contains all required concept groups."""
+    """Check required answer concepts and reject explicit abstentions."""
     concept_groups = EXPECTED_CONCEPTS.get(case["id"])
 
-    # Missing scoring rules must not silently fall back to exact matching.
-    if not concept_groups:
+    if not concept_groups or is_abstention(answer):
         return False
 
     normalized_answer = normalize(answer)
 
     return all(
-        any(normalize(term) in normalized_answer for term in alternatives)
+        any(
+            normalize(term) in normalized_answer
+            for term in alternatives
+        )
         for alternatives in concept_groups
     )
 
 
-def is_abstention(answer: str) -> bool:
-    """Detect common explicit statements that the source lacks an answer."""
-    normalized_answer = normalize(answer)
-    return any(marker in normalized_answer for marker in UNANSWERED_MARKERS)
+def retrieved_evidence_matches(
+    case: dict,
+    sources: list[dict[str, Any]],
+) -> bool:
+    """Check expected lexical evidence in chunks from the expected source."""
+    expected_source = case.get("expected_source")
+    concept_groups = RETRIEVAL_CONCEPTS.get(case["id"])
+
+    if not expected_source or not concept_groups or not sources:
+        return False
+
+    expected_name = normalize(expected_source)
+
+    matching_sources = [
+        source
+        for source in sources
+        if expected_name in normalize(source.get("filename") or "")
+    ]
+
+    if not matching_sources:
+        return False
+
+    retrieved_text = normalize(
+        " ".join(
+            source.get("content") or ""
+            for source in matching_sources
+        )
+    )
+
+    return all(
+        any(
+            normalize(term) in retrieved_text
+            for term in alternatives
+        )
+        for alternatives in concept_groups
+    )
 
 
 def evaluate_case(case: dict, user_id: int, limit: int) -> dict:
@@ -113,6 +194,7 @@ def evaluate_case(case: dict, user_id: int, limit: int) -> dict:
     }
 
     try:
+        # Generate the answer through the existing RAG pipeline.
         response = answer_question(
             question=case["question"],
             user_id=user_id,
@@ -125,17 +207,23 @@ def evaluate_case(case: dict, user_id: int, limit: int) -> dict:
         result["answer"] = answer
         result["sources"] = sources
 
-        expected_source = case.get("expected_source")
-        if expected_source:
-            expected_name = normalize(expected_source)
-            result["retrieval_hit"] = any(
-                expected_name in normalize(source.get("filename") or "")
-                for source in sources
+        if case["answerable"]:
+            # Retrieve actual chunk text for evidence evaluation.
+            # This performs a second search for each answerable question.
+            retrieved_chunks = search_documents(
+                query=case["question"],
+                user_id=user_id,
+                limit=limit,
             )
 
-        if case["answerable"]:
+            result["retrieval_hit"] = retrieved_evidence_matches(
+                case,
+                retrieved_chunks,
+            )
+
             result["answer_correct"] = answer_matches_expected_concepts(
-                case, answer
+                case,
+                answer,
             )
         else:
             result["correct_abstention"] = is_abstention(answer)
@@ -146,7 +234,8 @@ def evaluate_case(case: dict, user_id: int, limit: int) -> dict:
 
     finally:
         result["latency_ms"] = round(
-            (time.perf_counter() - started) * 1000, 2
+            (time.perf_counter() - started) * 1000,
+            2,
         )
 
     return result
@@ -175,7 +264,8 @@ def run_evaluation(user_id: int, limit: int = 5) -> dict:
                 / len(answerable),
                 4,
             )
-            if answerable else None
+            if answerable
+            else None
         ),
         "answer_correctness": (
             round(
@@ -183,11 +273,16 @@ def run_evaluation(user_id: int, limit: int = 5) -> dict:
                 / len(answerable),
                 4,
             )
-            if answerable else None
+            if answerable
+            else None
         ),
         "failure_rate": (
-            round(sum(r["failure"] for r in results) / total, 4)
-            if total else None
+            round(
+                sum(r["failure"] for r in results) / total,
+                4,
+            )
+            if total
+            else None
         ),
         "correct_abstention_rate": (
             round(
@@ -195,11 +290,13 @@ def run_evaluation(user_id: int, limit: int = 5) -> dict:
                 / len(unanswerable),
                 4,
             )
-            if unanswerable else None
+            if unanswerable
+            else None
         ),
         "average_latency_ms": (
             round(mean(r["latency_ms"] for r in results), 2)
-            if results else None
+            if results
+            else None
         ),
         "cases": results,
     }
