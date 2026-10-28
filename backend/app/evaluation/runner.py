@@ -10,6 +10,7 @@ from statistics import mean
 from typing import Any
 
 from app.evaluation.dataset import EVALUATION_DATASET
+from app.evaluation.grounding import evaluate_grounding
 from app.services.rag_service import answer_question
 from app.services.search_service import search_documents
 
@@ -37,10 +38,7 @@ EXPECTED_CONCEPTS = {
         ("embedding", "embeddings"),
         ("store", "stored", "stores", "storage"),
     ],
-    "rag-006": [
-        ("react",),
-        ("vite",),
-    ],
+    "rag-006": [("react",), ("vite",)],
     "rag-007": [("postgresql",)],
     "rag-008": [("ollama",)],
     "rag-009": [
@@ -62,10 +60,7 @@ EXPECTED_CONCEPTS = {
         ("retrieval", "retrieve", "retrieves"),
         ("source-grounding", "source grounding", "grounded"),
     ],
-    "rag-012": [
-        ("qdrant",),
-        ("postgresql",),
-    ],
+    "rag-012": [("qdrant",), ("postgresql",)],
 }
 
 # Required concepts expected in retrieved evidence.
@@ -203,7 +198,6 @@ def calculate_retrieval_metrics(
         for source in top_k_sources
     ]
 
-    # Fixed-K precision: divide by k, even if fewer than k results exist.
     precision_at_k = sum(relevant) / k
 
     reciprocal_rank = 0.0
@@ -236,6 +230,11 @@ def evaluate_case(case: dict, user_id: int, limit: int) -> dict:
         "error": None,
         "precision_at_k": None,
         "reciprocal_rank": None,
+        "groundedness_score": None,
+        "claims_checked": 0,
+        "supported_claims": 0,
+        "unsupported_claims": [],
+        "claim_results": [],
     }
 
     try:
@@ -250,10 +249,10 @@ def evaluate_case(case: dict, user_id: int, limit: int) -> dict:
 
         result["answer"] = answer
         result["sources"] = sources
+        retrieved_chunks = []
 
         if case["answerable"]:
-            # Search returns ranked chunks including filename and content.
-            # This is a separate search from the one inside answer_question.
+            # Retrieve actual chunk text for evidence and grounding checks.
             retrieved_chunks = search_documents(
                 query=case["question"],
                 user_id=user_id,
@@ -270,15 +269,36 @@ def evaluate_case(case: dict, user_id: int, limit: int) -> dict:
                 answer,
             )
 
-            metrics = calculate_retrieval_metrics(
-                case=case,
-                sources=retrieved_chunks,
-                k=limit,
+            result.update(
+                calculate_retrieval_metrics(
+                    case=case,
+                    sources=retrieved_chunks,
+                    k=limit,
+                )
             )
-            result.update(metrics)
 
         else:
+            # An unanswerable question should not receive a grounding score
+            # as if its generated answer were a successful factual answer.
             result["correct_abstention"] = is_abstention(answer)
+
+        # This is a lexical-overlap heuristic, not semantic entailment.
+        # Do not score abstentions as factual answers.
+        if case["answerable"] and not is_abstention(answer):
+            grounding = evaluate_grounding(
+                answer=answer,
+                retrieved_chunks=retrieved_chunks,
+            )
+        else:
+            grounding = {
+                "groundedness_score": None,
+                "claims_checked": 0,
+                "supported_claims": 0,
+                "unsupported_claims": [],
+                "claim_results": [],
+            }
+
+        result.update(grounding)
 
     except Exception as exc:
         result["failure"] = True
@@ -316,6 +336,12 @@ def run_evaluation(user_id: int, limit: int = 5) -> dict:
         if r["reciprocal_rank"] is not None
     ]
 
+    groundedness_values = [
+        r["groundedness_score"]
+        for r in answerable
+        if r["groundedness_score"] is not None
+    ]
+
     return {
         "evaluation_name": "enterprise-ai-rag-expanded",
         "user_id": user_id,
@@ -351,6 +377,12 @@ def run_evaluation(user_id: int, limit: int = 5) -> dict:
             if answerable
             else None
         ),
+        "average_groundedness_score": (
+            round(mean(groundedness_values), 4)
+            if groundedness_values
+            else None
+        ),
+        "grounding_method": "lexical_overlap_heuristic",
         "failure_rate": (
             round(
                 sum(r["failure"] for r in results) / total,
@@ -428,9 +460,16 @@ def main() -> None:
             f"precision_at_k={case['precision_at_k']} "
             f"reciprocal_rank={case['reciprocal_rank']} "
             f"answer_correct={case['answer_correct']} "
+            f"groundedness_score={case['groundedness_score']} "
+            f"claims_checked={case['claims_checked']} "
+            f"supported_claims={case['supported_claims']} "
             f"correct_abstention={case['correct_abstention']} "
             f"latency_ms={case['latency_ms']}"
         )
+
+        if case["unsupported_claims"]:
+            print(f"  Unsupported claims: {case['unsupported_claims']}")
+
         if case["error"]:
             print(f"  Error: {case['error']}")
 
