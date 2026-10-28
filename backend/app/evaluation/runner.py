@@ -176,7 +176,50 @@ def retrieved_evidence_matches(
     )
 
 
+def calculate_retrieval_metrics(
+    case: dict,
+    sources: list[dict[str, Any]],
+    k: int,
+) -> dict[str, float | None]:
+    """
+    Calculate document-level Precision@K and reciprocal rank.
+
+    Relevance is defined as a retrieved filename matching expected_source.
+    These are document-level proxies, not semantic chunk relevance metrics.
+    """
+    expected_source = case.get("expected_source")
+
+    if not expected_source or k <= 0:
+        return {
+            "precision_at_k": None,
+            "reciprocal_rank": None,
+        }
+
+    expected_name = normalize(expected_source)
+    top_k_sources = sources[:k]
+
+    relevant = [
+        expected_name in normalize(source.get("filename") or "")
+        for source in top_k_sources
+    ]
+
+    # Fixed-K precision: divide by k, even if fewer than k results exist.
+    precision_at_k = sum(relevant) / k
+
+    reciprocal_rank = 0.0
+    for rank, is_relevant in enumerate(relevant, start=1):
+        if is_relevant:
+            reciprocal_rank = 1.0 / rank
+            break
+
+    return {
+        "precision_at_k": round(precision_at_k, 4),
+        "reciprocal_rank": round(reciprocal_rank, 4),
+    }
+
+
 def evaluate_case(case: dict, user_id: int, limit: int) -> dict:
+    """Evaluate one question against the RAG pipeline."""
     started = time.perf_counter()
 
     result = {
@@ -191,10 +234,11 @@ def evaluate_case(case: dict, user_id: int, limit: int) -> dict:
         "answer": None,
         "sources": [],
         "error": None,
+        "precision_at_k": None,
+        "reciprocal_rank": None,
     }
 
     try:
-        # Generate the answer through the existing RAG pipeline.
         response = answer_question(
             question=case["question"],
             user_id=user_id,
@@ -208,8 +252,8 @@ def evaluate_case(case: dict, user_id: int, limit: int) -> dict:
         result["sources"] = sources
 
         if case["answerable"]:
-            # Retrieve actual chunk text for evidence evaluation.
-            # This performs a second search for each answerable question.
+            # Search returns ranked chunks including filename and content.
+            # This is a separate search from the one inside answer_question.
             retrieved_chunks = search_documents(
                 query=case["question"],
                 user_id=user_id,
@@ -225,6 +269,14 @@ def evaluate_case(case: dict, user_id: int, limit: int) -> dict:
                 case,
                 answer,
             )
+
+            metrics = calculate_retrieval_metrics(
+                case=case,
+                sources=retrieved_chunks,
+                k=limit,
+            )
+            result.update(metrics)
+
         else:
             result["correct_abstention"] = is_abstention(answer)
 
@@ -242,6 +294,7 @@ def evaluate_case(case: dict, user_id: int, limit: int) -> dict:
 
 
 def run_evaluation(user_id: int, limit: int = 5) -> dict:
+    """Run all evaluation cases and aggregate their metrics."""
     results = [
         evaluate_case(case, user_id, limit)
         for case in EVALUATION_DATASET
@@ -250,6 +303,18 @@ def run_evaluation(user_id: int, limit: int = 5) -> dict:
     total = len(results)
     answerable = [r for r in results if r["answerable"]]
     unanswerable = [r for r in results if not r["answerable"]]
+
+    precision_values = [
+        r["precision_at_k"]
+        for r in answerable
+        if r["precision_at_k"] is not None
+    ]
+
+    reciprocal_rank_values = [
+        r["reciprocal_rank"]
+        for r in answerable
+        if r["reciprocal_rank"] is not None
+    ]
 
     return {
         "evaluation_name": "enterprise-ai-rag-expanded",
@@ -265,6 +330,16 @@ def run_evaluation(user_id: int, limit: int = 5) -> dict:
                 4,
             )
             if answerable
+            else None
+        ),
+        "precision_at_k": (
+            round(mean(precision_values), 4)
+            if precision_values
+            else None
+        ),
+        "mean_reciprocal_rank": (
+            round(mean(reciprocal_rank_values), 4)
+            if reciprocal_rank_values
             else None
         ),
         "answer_correctness": (
@@ -350,6 +425,8 @@ def main() -> None:
         print(
             f"- {case['id']} [{status}] "
             f"retrieval_hit={case['retrieval_hit']} "
+            f"precision_at_k={case['precision_at_k']} "
+            f"reciprocal_rank={case['reciprocal_rank']} "
             f"answer_correct={case['answer_correct']} "
             f"correct_abstention={case['correct_abstention']} "
             f"latency_ms={case['latency_ms']}"

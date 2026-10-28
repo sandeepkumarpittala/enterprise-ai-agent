@@ -1,6 +1,7 @@
 
 from app.evaluation.runner import (
     answer_matches_expected_concepts,
+    calculate_retrieval_metrics,
     is_abstention,
     normalize,
 )
@@ -45,6 +46,7 @@ def test_normal_answer_is_not_an_abstention():
 def test_normalize_lowercases_and_collapses_whitespace():
     assert normalize("  RAG   Uses\nQdrant  ") == "rag uses qdrant"
 
+
 def test_answer_correctness_rejects_answer_missing_required_concepts():
     case = {"id": "rag-001"}
     answer = "The application uses PostgreSQL as its relational database."
@@ -58,11 +60,13 @@ def test_answer_correctness_does_not_accept_unrelated_answer():
 
     assert answer_matches_expected_concepts(case, answer) is False
 
+
 def test_answerable_question_rejects_abstention():
     case = {"id": "rag-001"}
     answer = "I could not find the answer in the provided documents."
 
     assert answer_matches_expected_concepts(case, answer) is False
+
 
 def test_expected_fact_must_appear_in_retrieved_content():
     expected_fact = "Qdrant is the vector database."
@@ -76,3 +80,77 @@ def test_expected_fact_must_appear_in_retrieved_content():
 
     assert "qdrant" in relevant_chunk.lower()
     assert "qdrant" not in irrelevant_chunk.lower()
+
+
+def test_precision_and_reciprocal_rank_when_expected_document_is_first():
+    case = {"expected_source": "enterprise_ai_rag_test_document.pdf"}
+    sources = [
+        {"filename": "enterprise_ai_rag_test_document.pdf"},
+        {"filename": "other_document.pdf"},
+        {"filename": "another_document.pdf"},
+        {"filename": "third_document.pdf"},
+        {"filename": "fourth_document.pdf"},
+    ]
+
+    metrics = calculate_retrieval_metrics(case, sources, k=5)
+
+    assert metrics == {
+        "precision_at_k": 0.2,
+        "reciprocal_rank": 1.0,
+    }
+
+
+def test_reciprocal_rank_when_expected_document_is_third():
+    case = {"expected_source": "enterprise_ai_rag_test_document.pdf"}
+    sources = [
+        {"filename": "other_document.pdf"},
+        {"filename": "another_document.pdf"},
+        {"filename": "enterprise_ai_rag_test_document.pdf"},
+        {"filename": "fourth_document.pdf"},
+        {"filename": "fifth_document.pdf"},
+    ]
+
+    metrics = calculate_retrieval_metrics(case, sources, k=5)
+
+    assert metrics == {
+        "precision_at_k": 0.2,
+        "reciprocal_rank": 0.3333,
+    }
+
+
+def test_metrics_are_zero_when_expected_document_is_missing():
+    case = {"expected_source": "enterprise_ai_rag_test_document.pdf"}
+    sources = [
+        {"filename": "other_document.pdf"},
+        {"filename": "another_document.pdf"},
+    ]
+
+    metrics = calculate_retrieval_metrics(case, sources, k=5)
+
+    assert metrics == {
+        "precision_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+    }
+
+
+def test_empty_retrieval_results_return_zero_metrics():
+    case = {"expected_source": "enterprise_ai_rag_test_document.pdf"}
+
+    metrics = calculate_retrieval_metrics(case, [], k=5)
+
+    assert metrics == {
+        "precision_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+    }
+
+
+def test_metrics_return_none_when_expected_source_is_missing():
+    case = {"id": "rag-unknown"}
+    sources = [{"filename": "some_document.pdf"}]
+
+    metrics = calculate_retrieval_metrics(case, sources, k=5)
+
+    assert metrics == {
+        "precision_at_k": None,
+        "reciprocal_rank": None,
+    }
