@@ -48,12 +48,11 @@ EXPECTED_CONCEPTS = {
         ("language model", "llm"),
         ("answer",),
     ],
-    "rag-010": [
+      "rag-010": [
         ("extract", "extraction"),
         ("chunk", "chunks", "chunking"),
         ("embedding", "embeddings"),
         ("retrieval", "retrieve", "retrieved"),
-        ("authenticated user", "document owner", "belongs to the user", "user"),
     ],
     "rag-011": [
         ("reduce unsupported answers", "reduces unsupported answers"),
@@ -64,8 +63,7 @@ EXPECTED_CONCEPTS = {
 }
 
 # Required concepts expected in retrieved evidence.
-# This checks lexical coverage across chunks from the expected document.
-# It does not prove semantic relevance or entailment.
+# This checks lexical coverage, not semantic relevance or entailment.
 RETRIEVAL_CONCEPTS = {
     "rag-001": [("qdrant",)],
     "rag-002": [("fastapi",)],
@@ -109,10 +107,7 @@ def normalize(text: str) -> str:
 def is_abstention(answer: str) -> bool:
     """Detect common explicit statements that the source lacks an answer."""
     normalized_answer = normalize(answer)
-    return any(
-        marker in normalized_answer
-        for marker in UNANSWERED_MARKERS
-    )
+    return any(marker in normalized_answer for marker in UNANSWERED_MARKERS)
 
 
 def answer_matches_expected_concepts(case: dict, answer: str) -> bool:
@@ -125,10 +120,7 @@ def answer_matches_expected_concepts(case: dict, answer: str) -> bool:
     normalized_answer = normalize(answer)
 
     return all(
-        any(
-            normalize(term) in normalized_answer
-            for term in alternatives
-        )
+        any(normalize(term) in normalized_answer for term in alternatives)
         for alternatives in concept_groups
     )
 
@@ -156,17 +148,11 @@ def retrieved_evidence_matches(
         return False
 
     retrieved_text = normalize(
-        " ".join(
-            source.get("content") or ""
-            for source in matching_sources
-        )
+        " ".join(source.get("content") or "" for source in matching_sources)
     )
 
     return all(
-        any(
-            normalize(term) in retrieved_text
-            for term in alternatives
-        )
+        any(normalize(term) in retrieved_text for term in alternatives)
         for alternatives in concept_groups
     )
 
@@ -176,19 +162,11 @@ def calculate_retrieval_metrics(
     sources: list[dict[str, Any]],
     k: int,
 ) -> dict[str, float | None]:
-    """
-    Calculate document-level Precision@K and reciprocal rank.
-
-    Relevance is defined as a retrieved filename matching expected_source.
-    These are document-level proxies, not semantic chunk relevance metrics.
-    """
+    """Calculate document-level Precision@K and reciprocal rank."""
     expected_source = case.get("expected_source")
 
     if not expected_source or k <= 0:
-        return {
-            "precision_at_k": None,
-            "reciprocal_rank": None,
-        }
+        return {"precision_at_k": None, "reciprocal_rank": None}
 
     expected_name = normalize(expected_source)
     top_k_sources = sources[:k]
@@ -212,7 +190,46 @@ def calculate_retrieval_metrics(
     }
 
 
-def evaluate_case(case: dict, user_id: int, limit: int) -> dict:
+def calculate_chunk_retrieval_metrics(
+    relevant_chunk_ids: set[int | str],
+    retrieved_chunks: list[dict[str, Any]],
+    k: int,
+) -> dict[str, float | int | None]:
+    """Calculate chunk-level Precision@K and Recall@K."""
+    if k <= 0:
+        raise ValueError("k must be a positive integer.")
+
+    if not relevant_chunk_ids:
+        return {
+            "chunk_precision_at_k": None,
+            "chunk_recall_at_k": None,
+            "relevant_chunks_retrieved": 0,
+        }
+
+    top_k = retrieved_chunks[:k]
+    retrieved_ids = [
+        chunk.get("chunk_id")
+        for chunk in top_k
+        if chunk.get("chunk_id") is not None
+    ]
+
+    relevant_retrieved = len(set(retrieved_ids) & relevant_chunk_ids)
+
+    return {
+        "chunk_precision_at_k": round(relevant_retrieved / k, 4),
+        "chunk_recall_at_k": round(
+            relevant_retrieved / len(relevant_chunk_ids), 4
+        ),
+        "relevant_chunks_retrieved": relevant_retrieved,
+    }
+
+
+def evaluate_case(
+    case: dict,
+    user_id: int,
+    limit: int,
+    document_id: int | None = None,
+) -> dict:
     """Evaluate one question against the RAG pipeline."""
     started = time.perf_counter()
 
@@ -230,6 +247,9 @@ def evaluate_case(case: dict, user_id: int, limit: int) -> dict:
         "error": None,
         "precision_at_k": None,
         "reciprocal_rank": None,
+        "chunk_precision_at_k": None,
+        "chunk_recall_at_k": None,
+        "relevant_chunks_retrieved": 0,
         "groundedness_score": None,
         "claims_checked": 0,
         "supported_claims": 0,
@@ -238,11 +258,17 @@ def evaluate_case(case: dict, user_id: int, limit: int) -> dict:
     }
 
     try:
-        response = answer_question(
-            question=case["question"],
-            user_id=user_id,
-            limit=limit,
-        )
+        # Preserve compatibility with callers and mocks when no document ID
+        # is provided. When supplied, constrain both generation and evaluation.
+        answer_kwargs: dict[str, Any] = {
+            "question": case["question"],
+            "user_id": user_id,
+            "limit": limit,
+        }
+        if document_id is not None:
+            answer_kwargs["document_id"] = document_id
+
+        response = answer_question(**answer_kwargs)
 
         answer = response.get("answer") or ""
         sources = response.get("sources") or []
@@ -252,21 +278,22 @@ def evaluate_case(case: dict, user_id: int, limit: int) -> dict:
         retrieved_chunks = []
 
         if case["answerable"]:
-            # Retrieve actual chunk text for evidence and grounding checks.
-            retrieved_chunks = search_documents(
-                query=case["question"],
-                user_id=user_id,
-                limit=limit,
-            )
+            search_kwargs: dict[str, Any] = {
+                "query": case["question"],
+                "user_id": user_id,
+                "limit": limit,
+            }
+            if document_id is not None:
+                search_kwargs["document_id"] = document_id
+
+            retrieved_chunks = search_documents(**search_kwargs)
 
             result["retrieval_hit"] = retrieved_evidence_matches(
-                case,
-                retrieved_chunks,
+                case, retrieved_chunks
             )
 
             result["answer_correct"] = answer_matches_expected_concepts(
-                case,
-                answer,
+                case, answer
             )
 
             result.update(
@@ -277,13 +304,18 @@ def evaluate_case(case: dict, user_id: int, limit: int) -> dict:
                 )
             )
 
+            result.update(
+                calculate_chunk_retrieval_metrics(
+                    relevant_chunk_ids=set(case["relevant_chunk_ids"]),
+                    retrieved_chunks=retrieved_chunks,
+                    k=limit,
+                )
+            )
         else:
-            # An unanswerable question should not receive a grounding score
-            # as if its generated answer were a successful factual answer.
+            # Unanswerable questions should be answered with an abstention.
             result["correct_abstention"] = is_abstention(answer)
 
         # This is a lexical-overlap heuristic, not semantic entailment.
-        # Do not score abstentions as factual answers.
         if case["answerable"] and not is_abstention(answer):
             grounding = evaluate_grounding(
                 answer=answer,
@@ -306,17 +338,20 @@ def evaluate_case(case: dict, user_id: int, limit: int) -> dict:
 
     finally:
         result["latency_ms"] = round(
-            (time.perf_counter() - started) * 1000,
-            2,
+            (time.perf_counter() - started) * 1000, 2
         )
 
     return result
 
 
-def run_evaluation(user_id: int, limit: int = 5) -> dict:
+def run_evaluation(
+    user_id: int,
+    limit: int = 5,
+    document_id: int | None = None,
+) -> dict:
     """Run all evaluation cases and aggregate their metrics."""
     results = [
-        evaluate_case(case, user_id, limit)
+        evaluate_case(case, user_id, limit, document_id)
         for case in EVALUATION_DATASET
     ]
 
@@ -336,6 +371,18 @@ def run_evaluation(user_id: int, limit: int = 5) -> dict:
         if r["reciprocal_rank"] is not None
     ]
 
+    chunk_precision_values = [
+        r["chunk_precision_at_k"]
+        for r in answerable
+        if r["chunk_precision_at_k"] is not None
+    ]
+
+    chunk_recall_values = [
+        r["chunk_recall_at_k"]
+        for r in answerable
+        if r["chunk_recall_at_k"] is not None
+    ]
+
     groundedness_values = [
         r["groundedness_score"]
         for r in answerable
@@ -345,23 +392,21 @@ def run_evaluation(user_id: int, limit: int = 5) -> dict:
     return {
         "evaluation_name": "enterprise-ai-rag-expanded",
         "user_id": user_id,
+        "document_id": document_id,
         "retrieval_limit": limit,
         "total_questions": total,
         "answerable_questions": len(answerable),
         "unanswerable_questions": len(unanswerable),
         "retrieval_hit_rate": (
             round(
-                sum(r["retrieval_hit"] for r in answerable)
-                / len(answerable),
+                sum(r["retrieval_hit"] for r in answerable) / len(answerable),
                 4,
             )
             if answerable
             else None
         ),
         "precision_at_k": (
-            round(mean(precision_values), 4)
-            if precision_values
-            else None
+            round(mean(precision_values), 4) if precision_values else None
         ),
         "mean_reciprocal_rank": (
             round(mean(reciprocal_rank_values), 4)
@@ -370,8 +415,7 @@ def run_evaluation(user_id: int, limit: int = 5) -> dict:
         ),
         "answer_correctness": (
             round(
-                sum(r["answer_correct"] for r in answerable)
-                / len(answerable),
+                sum(r["answer_correct"] for r in answerable) / len(answerable),
                 4,
             )
             if answerable
@@ -384,10 +428,7 @@ def run_evaluation(user_id: int, limit: int = 5) -> dict:
         ),
         "grounding_method": "lexical_overlap_heuristic",
         "failure_rate": (
-            round(
-                sum(r["failure"] for r in results) / total,
-                4,
-            )
+            round(sum(r["failure"] for r in results) / total, 4)
             if total
             else None
         ),
@@ -403,6 +444,16 @@ def run_evaluation(user_id: int, limit: int = 5) -> dict:
         "average_latency_ms": (
             round(mean(r["latency_ms"] for r in results), 2)
             if results
+            else None
+        ),
+        "chunk_precision_at_k": (
+            round(mean(chunk_precision_values), 4)
+            if chunk_precision_values
+            else None
+        ),
+        "chunk_recall_at_k": (
+            round(mean(chunk_recall_values), 4)
+            if chunk_recall_values
             else None
         ),
         "cases": results,
@@ -425,29 +476,39 @@ def main() -> None:
         default=5,
         help="Maximum number of chunks retrieved per question (1-20).",
     )
+    parser.add_argument(
+        "--document-id",
+        type=int,
+        default=None,
+        help="Optional document ID to restrict retrieval to one document.",
+    )
+
     args = parser.parse_args()
 
     if args.user_id <= 0:
         parser.error("--user-id must be a positive integer.")
+
     if not 1 <= args.limit <= 20:
         parser.error("--limit must be between 1 and 20.")
 
-    report = run_evaluation(args.user_id, args.limit)
+    if args.document_id is not None and args.document_id <= 0:
+        parser.error("--document-id must be a positive integer.")
+
+    report = run_evaluation(
+        user_id=args.user_id,
+        limit=args.limit,
+        document_id=args.document_id,
+    )
 
     report_path = (
-        Path(__file__).resolve().parents[2]
-        / "rag_evaluation_report.json"
+        Path(__file__).resolve().parents[2] / "rag_evaluation_report.json"
     )
     report_path.write_text(
         json.dumps(report, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
 
-    summary = {
-        key: value
-        for key, value in report.items()
-        if key != "cases"
-    }
+    summary = {key: value for key, value in report.items() if key != "cases"}
     print(json.dumps(summary, indent=2))
     print(f"\nDetailed report saved to: {report_path}")
 

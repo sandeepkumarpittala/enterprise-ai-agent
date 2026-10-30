@@ -54,3 +54,17 @@ def test_every_case_has_required_fields():
         assert case["id"]
         assert case["question"]
         assert isinstance(case["answerable"], bool)
+
+def test_every_case_has_relevant_chunk_ids():
+    for case in EVALUATION_DATASET:
+        assert "relevant_chunk_ids" in case
+        assert isinstance(case["relevant_chunk_ids"], list)
+
+        if not case["answerable"]:
+            assert case["relevant_chunk_ids"] == []
+        else:
+            assert case["relevant_chunk_ids"]
+            assert all(
+                isinstance(chunk_id, int)
+                for chunk_id in case["relevant_chunk_ids"]
+            )

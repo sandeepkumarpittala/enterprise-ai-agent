@@ -99,11 +99,11 @@ def chat(
         )
 
         assistant_message = Message(
-            conversation_id=conversation.id,
-            role="assistant",
-            content=result["answer"],
-        )
-
+    conversation_id=conversation.id,
+    role="assistant",
+    content=result["answer"],
+    sources=result.get("sources", []),
+)
         db.add_all([user_message, assistant_message])
         db.flush()
 

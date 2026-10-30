@@ -11,6 +11,7 @@ from app.models.user import User
 from app.schemas.document_search import DocumentSearchRequest
 from app.services.document_service import save_uploaded_document
 from app.services.search_service import search_documents
+from app.models.document_chunk import DocumentChunk
 
 from pathlib import Path
 
@@ -96,6 +97,39 @@ def list_uploaded_documents(
             }
             for document in documents
         ],
+    }
+
+@router.get("/{document_id}/chunks/{chunk_id}", response_model=dict)
+def get_document_chunk(
+    document_id: int,
+    chunk_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    result = db.execute(
+        select(DocumentChunk, Document.filename)
+        .join(Document, Document.id == DocumentChunk.document_id)
+        .where(
+            DocumentChunk.id == chunk_id,
+            DocumentChunk.document_id == document_id,
+            Document.user_id == current_user.id,
+        )
+    ).first()
+
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document chunk not found.",
+        )
+
+    chunk, filename = result
+
+    return {
+        "document_id": document_id,
+        "document_filename": filename,
+        "chunk_id": chunk.id,
+        "chunk_index": chunk.chunk_index,
+        "content": chunk.content,
     }
 
 @router.delete("/{document_id}", response_model=dict)

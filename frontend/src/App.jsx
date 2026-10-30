@@ -9,6 +9,7 @@ import {
   deleteDocument,
   getConversations,
   getConversationMessages,
+  getDocumentChunk,
 } from './api'
 import './App.css'
 
@@ -47,6 +48,11 @@ function App() {
   const [conversationsLoading, setConversationsLoading] = useState(false)
   const [conversationsError, setConversationsError] = useState('')
   const [historyLoading, setHistoryLoading] = useState(false)
+
+  const [expandedSources, setExpandedSources] = useState({})
+  const [sourceLoading, setSourceLoading] = useState({})
+  const [sourceErrors, setSourceErrors] = useState({})
+  const [sourceContent, setSourceContent] = useState({})
 
   useEffect(() => {
     let cancelled = false
@@ -259,6 +265,60 @@ function App() {
       setHistoryLoading(false)
     }
   }
+  async function handleSourceClick(messageId, source) {
+  const sourceKey = `${messageId}-${source.document_id}-${source.chunk_id}`
+
+  // Close source if it is already expanded.
+  if (expandedSources[sourceKey]) {
+    setExpandedSources((previous) => ({
+      ...previous,
+      [sourceKey]: false,
+    }))
+    return
+  }
+
+  // Expand source.
+  setExpandedSources((previous) => ({
+    ...previous,
+    [sourceKey]: true,
+  }))
+
+  // Use cached content if already fetched.
+  if (sourceContent[sourceKey]) return
+
+  setSourceLoading((previous) => ({
+    ...previous,
+    [sourceKey]: true,
+  }))
+
+  setSourceErrors((previous) => ({
+    ...previous,
+    [sourceKey]: '',
+  }))
+
+  try {
+    const result = await getDocumentChunk(
+      token,
+      source.document_id,
+      source.chunk_id,
+    )
+
+    setSourceContent((previous) => ({
+      ...previous,
+      [sourceKey]: result.content,
+    }))
+  } catch (err) {
+    setSourceErrors((previous) => ({
+      ...previous,
+      [sourceKey]: err.message || 'Unable to load source text.',
+    }))
+  } finally {
+    setSourceLoading((previous) => ({
+      ...previous,
+      [sourceKey]: false,
+    }))
+  }
+}
 
   async function handleChatSubmit(event) {
     event.preventDefault()
@@ -573,191 +633,279 @@ function App() {
           </div>
         </header>
 
-        {activeView === 'chat' ? (
-          <section className="chat-workspace">
-            <div className="chat-intro">
-              <div className="welcome-icon">✳</div>
-              <p className="eyebrow">YOUR PRIVATE AI WORKSPACE</p>
-              <h2>
-                {selectedConversationId
-                  ? conversations.find(
-                      (item) => item.id === selectedConversationId,
-                    )?.title || 'Conversation'
-                  : 'Ask your documents anything.'}
-              </h2>
-              <p className="welcome-description">
-                Ask questions about your uploaded documents and receive
-                answers grounded in retrieved context.
-              </p>
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => setActiveView('documents')}
-              >
-                Open document workspace →
-              </button>
-            </div>
+        
+        
+{activeView === 'chat' ? (
+  <section className="chat-workspace">
+    <div className="chat-intro">
+      <div className="welcome-icon">✳</div>
+      <p className="eyebrow">YOUR PRIVATE AI WORKSPACE</p>
 
-            {historyLoading && <p>Loading conversation messages...</p>}
+      <h2>
+        {selectedConversationId
+          ? conversations.find(
+              (item) => item.id === selectedConversationId,
+            )?.title || 'Conversation'
+          : 'Ask your documents anything.'}
+      </h2>
 
-            {!historyLoading && chatMessages.length > 0 && (
-              <div className="chat-message-list">
-                {chatMessages.map((message) => (
-                  <article
-                    className={`chat-message chat-message-${message.role}`}
-                    key={message.id}
-                  >
-                    <p className="chat-message-role">
-                      {message.role === 'user' ? 'You' : 'AI Assistant'}
-                    </p>
-                    <div className="chat-message-content">
-                      {message.content}
-                    </div>
-                  </article>
-                ))}
-              </div>
-            )}
+      <p className="welcome-description">
+        Ask questions about your uploaded documents and receive
+        answers grounded in retrieved context.
+      </p>
 
-            {chatLoading && (
-              <div className="form-message" role="status">
-                Generating an answer...
-              </div>
-            )}
+      <button
+        type="button"
+        className="secondary-button"
+        onClick={() => setActiveView('documents')}
+      >
+        Open document workspace →
+      </button>
+    </div>
 
-            {chatError && (
-              <div className="form-message error-message" role="alert">
-                {chatError}
-              </div>
-            )}
+    {historyLoading && <p>Loading conversation messages...</p>}
 
-            <form className="chat-form" onSubmit={handleChatSubmit}>
-              <label htmlFor="chat-question">Your question</label>
-              <textarea
-                id="chat-question"
-                value={chatQuestion}
-                onChange={(event) => setChatQuestion(event.target.value)}
-                placeholder="Ask a question about your documents..."
-                rows={3}
-                maxLength={2000}
-                required
-                disabled={chatLoading || historyLoading}
-              />
-
-              <div className="chat-form-footer">
-                <span>{chatQuestion.length}/2000 characters</span>
-                <button
-                  type="submit"
-                  className="primary-button"
-                  disabled={
-                    !chatQuestion.trim() || chatLoading || historyLoading
-                  }
-                >
-                  {chatLoading ? 'Thinking...' : 'Ask AI →'}
-                </button>
-              </div>
-            </form>
-          </section>
-        ) : (
-          <section className="documents-placeholder">
-            <div className="welcome-icon">▤</div>
-            <h2>Build your knowledge base</h2>
-            <p>
-              Upload documents to index them for semantic search and grounded
-              AI answers.
+    {!historyLoading && chatMessages.length > 0 && (
+      <div className="chat-message-list">
+        {chatMessages.map((message) => (
+          <article
+            className={`chat-message chat-message-${message.role}`}
+            key={message.id}
+          >
+            <p className="chat-message-role">
+              {message.role === 'user' ? 'You' : 'AI Assistant'}
             </p>
 
-            <form onSubmit={handleDocumentUpload} className="upload-form">
-              <label htmlFor="document-file">Choose a document</label>
-              <input
-                ref={fileInputRef}
-                id="document-file"
-                type="file"
-                accept=".pdf,.docx,.txt,.md"
-                onChange={(event) => {
-                  setSelectedFile(event.target.files?.[0] ?? null)
-                  setUploadError('')
-                  setUploadSuccess('')
-                }}
-                disabled={uploading}
-                required
-              />
-
-              <p className="upload-hint">
-                Supported formats: PDF, DOCX, TXT, Markdown. Maximum size: 10
-                MB.
-              </p>
-
-              {uploadError && (
-                <div className="form-message error-message" role="alert">
-                  {uploadError}
-                </div>
-              )}
-              {uploadSuccess && (
-                <div className="form-message success-message" role="status">
-                  {uploadSuccess}
-                </div>
-              )}
-
-              <button
-                type="submit"
-                className="primary-button"
-                disabled={!selectedFile || uploading}
-              >
-                {uploading ? 'Uploading and indexing...' : 'Upload document'}
-              </button>
-            </form>
-
-            <div className="uploaded-documents">
-              <h3>Your documents</h3>
-              {documentsLoading && <p>Loading your documents...</p>}
-              {documentsError && (
-                <div className="form-message error-message" role="alert">
-                  {documentsError}
-                </div>
-              )}
-
-              {!documentsLoading &&
-                !documentsError &&
-                uploadedDocuments.length === 0 && (
-                  <p>No documents uploaded yet.</p>
-                )}
-
-              {uploadedDocuments.length > 0 && (
-                <ul>
-                  {uploadedDocuments.map((document, index) => (
-                    <li
-                      key={
-                        document.id ??
-                        `${document.filename ?? 'document'}-${index}`
-                      }
-                    >
-                      <span>
-                        {document.filename ?? 'Untitled document'}
-                      </span>
-                      <span className="status-dot" />
-                      <span>{document.status ?? 'Uploaded'}</span>
-                      <button
-                        type="button"
-                        className="delete-button"
-                        onClick={() => handleDocumentDelete(document)}
-                      >
-                        Delete
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
+            <div className="chat-message-content">
+              {message.content}
             </div>
 
-            <button
-              type="button"
-              className="secondary-button"
-              onClick={() => setActiveView('chat')}
-            >
-              Back to knowledge chat
-            </button>
-          </section>
+            {message.role === 'assistant' &&
+              Array.isArray(message.sources) &&
+              message.sources.length > 0 && (
+                <div className="chat-message-sources">
+                  <p className="chat-message-sources-title">
+                    Sources ({message.sources.length})
+                  </p>
+
+                  {message.sources.map((source, index) => {
+                    const sourceKey = `${message.id}-${source.document_id}-${source.chunk_id}`
+                    const isExpanded = Boolean(
+                      expandedSources[sourceKey],
+                    )
+
+                    return (
+                      <div
+                        className="chat-message-source"
+                        key={sourceKey}
+                      >
+                        <button
+                          type="button"
+                          className="chat-source-toggle"
+                          onClick={() =>
+                            handleSourceClick(message.id, source)
+                          }
+                          aria-expanded={isExpanded}
+                        >
+                          <span className="chat-source-heading">
+                            <strong>
+                              {source.filename || 'Unknown document'}
+                            </strong>
+                            <span>
+                              Chunk {source.chunk_index ?? index}
+                            </span>
+                          </span>
+
+                          <span className="chat-source-chevron">
+                            {isExpanded ? '−' : '+'}
+                          </span>
+                        </button>
+
+                        <div className="chat-source-metadata">
+                          <span>
+                            Document ID: {source.document_id}
+                          </span>
+                          <span>
+                            Chunk ID: {source.chunk_id}
+                          </span>
+
+                          {typeof source.score === 'number' && (
+                            <span>
+                              Relevance: {source.score.toFixed(3)}
+                            </span>
+                          )}
+                        </div>
+
+                        {isExpanded && (
+                          <div className="chat-source-preview">
+                            {sourceLoading[sourceKey] && (
+                              <p>Loading source text...</p>
+                            )}
+
+                            {sourceErrors[sourceKey] && (
+                              <p className="chat-source-error">
+                                {sourceErrors[sourceKey]}
+                              </p>
+                            )}
+
+                            {sourceContent[sourceKey] && (
+                              <p>{sourceContent[sourceKey]}</p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+          </article>
+        ))}
+      </div>
+    )}
+
+    <form className="chat-form" onSubmit={handleChatSubmit}>
+      <label htmlFor="chat-question">Your question</label>
+
+      <textarea
+        id="chat-question"
+        value={chatQuestion}
+        onChange={(event) => setChatQuestion(event.target.value)}
+        placeholder="Ask a question about your documents..."
+        rows={3}
+        maxLength={2000}
+        required
+        disabled={chatLoading || historyLoading}
+      />
+
+      {chatError && (
+        <div className="form-message error-message" role="alert">
+          {chatError}
+        </div>
+      )}
+
+      <div className="chat-form-footer">
+        <span>{chatQuestion.length}/2000 characters</span>
+
+        <button
+          type="submit"
+          className="primary-button"
+          disabled={
+            !chatQuestion.trim() || chatLoading || historyLoading
+          }
+        >
+          {chatLoading ? 'Thinking...' : 'Ask AI →'}
+        </button>
+      </div>
+    </form>
+  </section>
+) : (
+  <section className="documents-placeholder">
+    <div className="welcome-icon">▤</div>
+    <h2>Build your knowledge base</h2>
+
+    <p>
+      Upload documents to index them for semantic search and grounded
+      AI answers.
+    </p>
+
+    <form onSubmit={handleDocumentUpload} className="upload-form">
+      <label htmlFor="document-file">Choose a document</label>
+
+      <input
+        ref={fileInputRef}
+        id="document-file"
+        type="file"
+        accept=".pdf,.docx,.txt,.md"
+        onChange={(event) => {
+          setSelectedFile(event.target.files?.[0] ?? null)
+          setUploadError('')
+          setUploadSuccess('')
+        }}
+        disabled={uploading}
+        required
+      />
+
+      <p className="upload-hint">
+        Supported formats: PDF, DOCX, TXT, Markdown. Maximum size: 10 MB.
+      </p>
+
+      {uploadError && (
+        <div className="form-message error-message" role="alert">
+          {uploadError}
+        </div>
+      )}
+
+      {uploadSuccess && (
+        <div className="form-message success-message" role="status">
+          {uploadSuccess}
+        </div>
+      )}
+
+      <button
+        type="submit"
+        className="primary-button"
+        disabled={!selectedFile || uploading}
+      >
+        {uploading ? 'Uploading and indexing...' : 'Upload document'}
+      </button>
+    </form>
+
+    <div className="uploaded-documents">
+      <h3>Your documents</h3>
+
+      {documentsLoading && <p>Loading your documents...</p>}
+
+      {documentsError && (
+        <div className="form-message error-message" role="alert">
+          {documentsError}
+        </div>
+      )}
+
+      {!documentsLoading &&
+        !documentsError &&
+        uploadedDocuments.length === 0 && (
+          <p>No documents uploaded yet.</p>
         )}
+
+      {uploadedDocuments.length > 0 && (
+        <ul>
+          {uploadedDocuments.map((document, index) => (
+            <li
+              key={
+                document.id ??
+                `${document.filename ?? 'document'}-${index}`
+              }
+            >
+              <span>
+                {document.filename ?? 'Untitled document'}
+              </span>
+
+              <span className="status-dot" />
+              <span>{document.status ?? 'Uploaded'}</span>
+
+              <button
+                type="button"
+                className="delete-button"
+                onClick={() => handleDocumentDelete(document)}
+              >
+                Delete
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+
+    <button
+      type="button"
+      className="secondary-button"
+      onClick={() => setActiveView('chat')}
+    >
+      Back to knowledge chat
+    </button>
+  </section>
+)}
+
       </main>
     </div>
   )

@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -27,11 +27,13 @@ class ConversationResponse(BaseModel):
 
 
 class MessageResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     role: str
     content: str
+    sources: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime
-
 
 class ConversationMessagesResponse(BaseModel):
     conversation_id: int

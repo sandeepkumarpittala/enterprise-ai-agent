@@ -8,6 +8,7 @@ EVALUATION_DATASET = [
         "expected_answer": "Qdrant",
         "expected_source": "enterprise_ai_rag_test_document.pdf",
         "answerable": True,
+        "relevant_chunk_ids": [14, 15],
     },
     {
         "id": "rag-002",
@@ -15,6 +16,7 @@ EVALUATION_DATASET = [
         "expected_answer": "FastAPI",
         "expected_source": "enterprise_ai_rag_test_document.pdf",
         "answerable": True,
+        "relevant_chunk_ids": [14, 15],
     },
     {
         "id": "rag-003",
@@ -22,6 +24,7 @@ EVALUATION_DATASET = [
         "expected_answer": "sentence-transformers/all-MiniLM-L6-v2",
         "expected_source": "enterprise_ai_rag_test_document.pdf",
         "answerable": True,
+        "relevant_chunk_ids": [14, 15, 16],
     },
     {
         "id": "rag-004",
@@ -32,6 +35,7 @@ EVALUATION_DATASET = [
         ),
         "expected_source": "enterprise_ai_rag_test_document.pdf",
         "answerable": True,
+        "relevant_chunk_ids": [13, 14, 15, 16],
     },
     {
         "id": "rag-005",
@@ -39,13 +43,17 @@ EVALUATION_DATASET = [
         "expected_answer": None,
         "expected_source": None,
         "answerable": False,
+        "relevant_chunk_ids": [],
     },
     {
         "id": "rag-006",
-        "question": "Which frontend technology and build tool does the application use?",
+        "question": (
+            "Which frontend technology and build tool does the application use?"
+        ),
         "expected_answer": "React with Vite",
         "expected_source": "enterprise_ai_rag_test_document.pdf",
         "answerable": True,
+        "relevant_chunk_ids": [14, 15],
     },
     {
         "id": "rag-007",
@@ -53,6 +61,7 @@ EVALUATION_DATASET = [
         "expected_answer": "PostgreSQL",
         "expected_source": "enterprise_ai_rag_test_document.pdf",
         "answerable": True,
+        "relevant_chunk_ids": [14, 15],
     },
     {
         "id": "rag-008",
@@ -60,6 +69,7 @@ EVALUATION_DATASET = [
         "expected_answer": "Ollama",
         "expected_source": "enterprise_ai_rag_test_document.pdf",
         "answerable": True,
+        "relevant_chunk_ids": [14, 15],
     },
     {
         "id": "rag-009",
@@ -71,6 +81,7 @@ EVALUATION_DATASET = [
         ),
         "expected_source": "enterprise_ai_rag_test_document.pdf",
         "answerable": True,
+        "relevant_chunk_ids": [14, 15],
     },
     {
         "id": "rag-010",
@@ -79,24 +90,24 @@ EVALUATION_DATASET = [
             "but the agent cannot find it?"
         ),
         "expected_answer": (
-            "Check text extraction, chunk creation, embedding storage, "
-            "retrieval results, and whether the document belongs to the "
-            "authenticated user."
+            "Check whether text extraction succeeded, chunks were created, "
+            "embeddings were stored, and retrieval returns the expected chunks. "
+            "Also confirm that the document belongs to the authenticated user."
         ),
         "expected_source": "enterprise_ai_rag_test_document.pdf",
         "answerable": True,
+        "relevant_chunk_ids": [15],
     },
     {
         "id": "rag-011",
-        "question": (
-            "How does RAG help reduce unsupported answers?"
-        ),
+        "question": "How does RAG help reduce unsupported answers?",
         "expected_answer": (
             "RAG retrieves relevant information from a knowledge source "
             "and provides it to a language model to generate a grounded answer."
         ),
         "expected_source": "enterprise_ai_rag_test_document.pdf",
         "answerable": True,
+        "relevant_chunk_ids": [13],
     },
     {
         "id": "rag-012",
@@ -107,15 +118,15 @@ EVALUATION_DATASET = [
         "expected_answer": "Qdrant and PostgreSQL",
         "expected_source": "enterprise_ai_rag_test_document.pdf",
         "answerable": True,
+        "relevant_chunk_ids": [14, 15],
     },
     {
         "id": "rag-013",
-        "question": (
-            "What is the name of the company's real-world CEO?"
-        ),
+        "question": "What is the name of the company's real-world CEO?",
         "expected_answer": None,
         "expected_source": None,
         "answerable": False,
+        "relevant_chunk_ids": [],
     },
     {
         "id": "rag-014",
@@ -125,6 +136,7 @@ EVALUATION_DATASET = [
         "expected_answer": None,
         "expected_source": None,
         "answerable": False,
+        "relevant_chunk_ids": [],
     },
     {
         "id": "rag-015",
@@ -134,5 +146,6 @@ EVALUATION_DATASET = [
         "expected_answer": None,
         "expected_source": None,
         "answerable": False,
+        "relevant_chunk_ids": [],
     },
 ]

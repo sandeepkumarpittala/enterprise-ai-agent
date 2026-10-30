@@ -117,3 +117,15 @@ export async function sendChatMessage(
     body: JSON.stringify({ question, limit }),
   })
 }
+export async function getDocumentChunk(
+  token,
+  documentId,
+  chunkId,
+) {
+  return request(
+    `/documents/${documentId}/chunks/${chunkId}`,
+    {
+      headers: authHeaders(token),
+    },
+  )
+}

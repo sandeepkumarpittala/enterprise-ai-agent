@@ -1,6 +1,7 @@
 
 from app.evaluation.runner import (
     answer_matches_expected_concepts,
+    calculate_chunk_retrieval_metrics,
     calculate_retrieval_metrics,
     is_abstention,
     normalize,
@@ -154,3 +155,63 @@ def test_metrics_return_none_when_expected_source_is_missing():
         "precision_at_k": None,
         "reciprocal_rank": None,
     }
+
+def test_chunk_metrics_when_relevant_chunks_are_retrieved():
+    metrics = calculate_chunk_retrieval_metrics(
+        relevant_chunk_ids={10, 20},
+        retrieved_chunks=[
+            {"chunk_id": 10},
+            {"chunk_id": 30},
+            {"chunk_id": 20},
+            {"chunk_id": 40},
+        ],
+        k=4,
+    )
+
+    assert metrics == {
+        "chunk_precision_at_k": 0.5,
+        "chunk_recall_at_k": 1.0,
+        "relevant_chunks_retrieved": 2,
+    }
+
+
+def test_chunk_metrics_when_no_relevant_chunks_are_retrieved():
+    metrics = calculate_chunk_retrieval_metrics(
+        relevant_chunk_ids={10, 20},
+        retrieved_chunks=[
+            {"chunk_id": 30},
+            {"chunk_id": 40},
+        ],
+        k=2,
+    )
+
+    assert metrics == {
+        "chunk_precision_at_k": 0.0,
+        "chunk_recall_at_k": 0.0,
+        "relevant_chunks_retrieved": 0,
+    }
+
+
+def test_chunk_metrics_are_none_without_relevance_labels():
+    metrics = calculate_chunk_retrieval_metrics(
+        relevant_chunk_ids=set(),
+        retrieved_chunks=[{"chunk_id": 10}],
+        k=1,
+    )
+
+    assert metrics == {
+        "chunk_precision_at_k": None,
+        "chunk_recall_at_k": None,
+        "relevant_chunks_retrieved": 0,
+    }
+
+
+def test_chunk_metrics_reject_nonpositive_k():
+    import pytest
+
+    with pytest.raises(ValueError):
+        calculate_chunk_retrieval_metrics(
+            relevant_chunk_ids={10},
+            retrieved_chunks=[{"chunk_id": 10}],
+            k=0,
+        )
