@@ -1,13 +1,16 @@
 
 import httpx
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
-OLLAMA_MODEL = "llama3.2:3b"
+from app.core.config import settings
+
+
 REQUEST_TIMEOUT = 120.0
 
 ABSTENTION_ANSWER = (
     "I could not find the answer in the provided documents."
 )
+
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 
 def generate_answer(
@@ -109,38 +112,181 @@ CURRENT QUESTION:
 Answer:
 """
 
-    payload = {
-        "model": OLLAMA_MODEL,
-        "prompt": prompt,
-        "stream": False,
-        "options": {
-            "temperature": 0.1,
-        },
-    }
+    provider = settings.llm_provider.lower()
 
     try:
         with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
-            response = client.post(OLLAMA_URL, json=payload)
-            response.raise_for_status()
-            data = response.json()
+
+            # Local Ollama
+            if provider == "ollama":
+
+                payload = {
+                    "model": settings.ollama_model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.1,
+                    },
+                }
+
+                response = client.post(
+                    settings.ollama_url,
+                    json=payload,
+                )
+                response.raise_for_status()
+
+                data = response.json()
+
+                if not isinstance(data, dict):
+                    raise RuntimeError(
+                        "Ollama returned an invalid response."
+                    )
+
+                answer = data.get("response", "")
+
+            # Hosted Groq
+            elif provider == "groq":
+
+                if not settings.groq_api_key:
+                    raise RuntimeError(
+                        "Groq API key is not configured."
+                    )
+
+                headers = {
+                    "Authorization": (
+                        f"Bearer {settings.groq_api_key}"
+                    ),
+                    "Content-Type": "application/json",
+                }
+
+                payload = {
+                    "model": settings.groq_model,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": prompt,
+                        }
+                    ],
+                    "temperature": 0.1,
+                }
+
+                response = client.post(
+                    GROQ_API_URL,
+                    headers=headers,
+                    json=payload,
+                )
+                response.raise_for_status()
+
+                data = response.json()
+
+                if not isinstance(data, dict):
+                    raise RuntimeError(
+                        "Groq returned an invalid response."
+                    )
+
+                choices = data.get("choices", [])
+
+                if not choices:
+                    raise RuntimeError(
+                        "Groq returned no answer choices."
+                    )
+
+                answer = (
+                    choices[0]
+                    .get("message", {})
+                    .get("content", "")
+                )
+
+            # Hosted Google Gemini
+            elif provider == "gemini":
+
+                if not settings.gemini_api_key:
+                    raise RuntimeError(
+                        "Gemini API key is not configured."
+                    )
+
+                url = (
+                    "https://generativelanguage.googleapis.com/"
+                    "v1beta/models/"
+                    f"{settings.gemini_model}:generateContent"
+                )
+
+                headers = {
+                    "x-goog-api-key": settings.gemini_api_key,
+                    "Content-Type": "application/json",
+                }
+
+                payload = {
+                    "contents": [
+                        {
+                            "role": "user",
+                            "parts": [
+                                {"text": prompt}
+                            ],
+                        }
+                    ],
+                    "generationConfig": {
+                        "temperature": 0.1,
+                    },
+                }
+
+                response = client.post(
+                    url,
+                    headers=headers,
+                    json=payload,
+                )
+                response.raise_for_status()
+
+                data = response.json()
+
+                if not isinstance(data, dict):
+                    raise RuntimeError(
+                        "Gemini returned an invalid response."
+                    )
+
+                candidates = data.get("candidates", [])
+
+                if not candidates:
+                    raise RuntimeError(
+                        "Gemini returned no answer candidates."
+                    )
+
+                parts = (
+                    candidates[0]
+                    .get("content", {})
+                    .get("parts", [])
+                )
+
+                answer = "\n".join(
+                    part.get("text", "")
+                    for part in parts
+                    if isinstance(part, dict)
+                    and isinstance(part.get("text"), str)
+                )
+
+            else:
+                raise ValueError(
+                    f"Unsupported LLM provider: {provider}"
+                )
 
     except httpx.TimeoutException as exc:
-        raise RuntimeError("Ollama request timed out.") from exc
+        raise RuntimeError(
+            f"{provider.capitalize()} request timed out."
+        ) from exc
 
     except httpx.HTTPError as exc:
-        raise RuntimeError("Could not communicate with Ollama.") from exc
+        raise RuntimeError(
+            f"Could not communicate with {provider.capitalize()}."
+        ) from exc
 
     except ValueError as exc:
         raise RuntimeError(
-            "Ollama returned an invalid JSON response."
+            f"{provider.capitalize()} returned invalid JSON."
         ) from exc
 
-    if not isinstance(data, dict):
-        raise RuntimeError("Ollama returned an invalid response.")
-
-    answer = data.get("response", "")
-
     if not isinstance(answer, str) or not answer.strip():
-        raise RuntimeError("Ollama returned an empty answer.")
+        raise RuntimeError(
+            f"{provider.capitalize()} returned an empty answer."
+        )
 
     return answer.strip()

@@ -3,6 +3,8 @@ from functools import lru_cache
 
 from qdrant_client import QdrantClient, models
 
+from app.core.config import settings
+
 
 COLLECTION_NAME = "enterprise_documents"
 VECTOR_SIZE = 384
@@ -11,7 +13,10 @@ VECTOR_SIZE = 384
 @lru_cache(maxsize=1)
 def get_qdrant_client() -> QdrantClient:
     """Create and reuse the Qdrant connection."""
-    return QdrantClient(url="http://localhost:6333")
+    return QdrantClient(
+        url=settings.qdrant_url,
+        api_key=settings.qdrant_api_key,
+    )
 
 
 def ensure_collection() -> None:
