@@ -6,7 +6,7 @@ from qdrant_client import QdrantClient, models
 from app.core.config import settings
 
 
-COLLECTION_NAME = "enterprise_documents"
+COLLECTION_NAME = "enterprise_documents_bge"
 VECTOR_SIZE = 384
 
 
