@@ -1,3 +1,5 @@
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   getCurrentUser,
@@ -421,7 +423,7 @@ function App() {
               in your own knowledge base.
             </p>
             <div className="auth-benefit">✓ Private, user-isolated documents</div>
-            <div className="auth-benefit">✓ Local LLM answer generation</div>
+            <div className="auth-benefit">✓ Cloud AI answer generation</div>
             <div className="auth-benefit">✓ Answers with source references</div>
           </div>
 
@@ -606,7 +608,7 @@ function App() {
           <div className="status-dot" />
           <div className="user-info">
             <strong>{user.email}</strong>
-            <p>Signed in · Local AI</p>
+            <p>Signed in · Cloud AI</p>
           </div>
         </div>
 
@@ -629,7 +631,7 @@ function App() {
           </div>
           <div className="local-badge">
             <span className="status-dot" />
-            Running locally
+            Cloud backend connected
           </div>
         </header>
 
@@ -677,9 +679,14 @@ function App() {
             </p>
 
             <div className="chat-message-content">
-              {message.content}
-            </div>
-
+  {message.role === 'assistant' ? (
+    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+      {message.content || ''}
+    </ReactMarkdown>
+  ) : (
+    message.content
+  )}
+</div>
             {message.role === 'assistant' &&
               Array.isArray(message.sources) &&
               message.sources.length > 0 && (
