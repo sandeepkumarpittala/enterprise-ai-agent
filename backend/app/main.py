@@ -13,18 +13,18 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# Configure CORS for the local React/Vite frontend.
+# Configure CORS for local and production frontends.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "https://enterprise-ai-agent-lime.vercel.app",
     ],
     allow_credentials=False,
     allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
-
 # Register API routers.
 app.include_router(auth_router)
 app.include_router(documents_router)
