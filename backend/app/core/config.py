@@ -16,6 +16,9 @@ class Settings(BaseSettings):
 
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: str | None = None
+    cloudflare_account_id: str | None = None
+    cloudflare_api_token: str | None = None
+    cloudflare_embedding_model: str = "@cf/baai/bge-small-en-v1.5"
 
     llm_provider: str = "ollama"
 
